@@ -1,7 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./DocumentPanel.css";
+// Reutiliza .verdict-badge / .layers / .layer-card, que ya viven ahí.
+import "./CargoVerifyPanel.css";
 
 const API_URL = "http://localhost:8000";
+
+const VERDICT_CLASS = {
+  coincide: "ok",
+  revision: "warn",
+  no_coincide: "bad",
+};
+
+function pct(v) {
+  return `${((v || 0) * 100).toFixed(1)}%`;
+}
 
 function DocumentPanel() {
   const [file, setFile] = useState(null);
@@ -24,6 +36,30 @@ function DocumentPanel() {
   const [sealResult, setSealResult] = useState(null);
   const [sealLoading, setSealLoading] = useState(false);
 
+  const [plantillas, setPlantillas] = useState([]);
+  const [nuevaPlantilla, setNuevaPlantilla] = useState(null);
+  const [nombrePlantilla, setNombrePlantilla] = useState("");
+  const [registrando, setRegistrando] = useState(false);
+
+  const [plantillaForzada, setPlantillaForzada] = useState("");
+  const [formatoResult, setFormatoResult] = useState(null);
+  const [formatoLoading, setFormatoLoading] = useState(false);
+  const [verDetalle, setVerDetalle] = useState(false);
+
+  useEffect(() => {
+    cargarPlantillas();
+  }, []);
+
+  async function cargarPlantillas() {
+    try {
+      const res = await fetch(`${API_URL}/plantillas`);
+      const data = await res.json();
+      setPlantillas(data.plantillas || []);
+    } catch {
+      // El banco vacío no es un error que valga la pena mostrar al abrir.
+    }
+  }
+
   function handleFileChange(e) {
     const f = e.target.files[0];
     if (!f) return;
@@ -33,6 +69,7 @@ function DocumentPanel() {
     setExactResults(null);
     setSemanticResults(null);
     setSealResult(null);
+    setFormatoResult(null);
     setError(null);
   }
 
@@ -116,6 +153,66 @@ function DocumentPanel() {
       setError(err.message);
     } finally {
       setSealLoading(false);
+    }
+  }
+
+  async function handleRegistrarPlantilla() {
+    if (!nuevaPlantilla || !nombrePlantilla.trim()) return;
+    setRegistrando(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", nuevaPlantilla);
+    formData.append("nombre", nombrePlantilla);
+
+    try {
+      const res = await fetch(`${API_URL}/plantillas`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setNuevaPlantilla(null);
+      setNombrePlantilla("");
+      await cargarPlantillas();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRegistrando(false);
+    }
+  }
+
+  async function handleEliminarPlantilla(id) {
+    try {
+      await fetch(`${API_URL}/plantillas/${id}`, { method: "DELETE" });
+      await cargarPlantillas();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleVerificarFormato() {
+    if (!file) return;
+    setFormatoLoading(true);
+    setFormatoResult(null);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    if (plantillaForzada) formData.append("plantilla_id", plantillaForzada);
+    // Si la sección 1 ya extrajo el texto, se reenvía para no repetir el OCR,
+    // que es con diferencia lo más lento del flujo.
+    if (ocrData) {
+      formData.append("lines", JSON.stringify(ocrData.lines));
+      formData.append("paragraphs", JSON.stringify(ocrData.paragraphs));
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/plantillas/verificar`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setFormatoResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setFormatoLoading(false);
     }
   }
 
@@ -282,6 +379,222 @@ function DocumentPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section className="doc-section">
+        <h2>5. Banco de plantillas</h2>
+        <p className="hint">
+          Registra una vez cada formato válido (certificado médico, orden de compra...). Se procesa en el momento
+          del alta y queda guardado, así que verificar después es rápido. El alta sí tarda: corre el OCR y busca los
+          sellos y firmas de la plantilla.
+        </p>
+
+        <div className="row">
+          <input
+            key={plantillas.length}
+            type="file"
+            accept="image/*,.pdf"
+            onChange={(e) => setNuevaPlantilla(e.target.files[0] || null)}
+          />
+          <input
+            type="text"
+            value={nombrePlantilla}
+            onChange={(e) => setNombrePlantilla(e.target.value)}
+            placeholder="Nombre del formato (ej. certificado médico)"
+          />
+          <button
+            onClick={handleRegistrarPlantilla}
+            disabled={!nuevaPlantilla || !nombrePlantilla.trim() || registrando}
+          >
+            {registrando ? "Procesando plantilla..." : "Registrar plantilla"}
+          </button>
+        </div>
+
+        {plantillas.length === 0 ? (
+          <p className="hint">El banco está vacío. Registra al menos un formato para poder verificar documentos.</p>
+        ) : (
+          <table className="plantillas-tabla">
+            <thead>
+              <tr>
+                <th>Formato</th>
+                <th>Páginas</th>
+                <th>Bloques</th>
+                <th>Sellos / firmas</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {plantillas.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.nombre}</td>
+                  <td>{p.num_pages}</td>
+                  <td>{p.num_bloques}</td>
+                  <td>{p.num_graficos > 0 ? p.graficos.map((g) => g.label).join(", ") : "—"}</td>
+                  <td>
+                    <button className="link-danger" onClick={() => handleEliminarPlantilla(p.id)}>
+                      Eliminar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="doc-section">
+        <h2>6. Verificar formato contra el banco</h2>
+        <p className="hint">
+          Compara el documento cargado arriba contra las plantillas y dice a cuál corresponde y qué le falta. Solo se
+          exige que el documento contenga lo que la plantilla tiene: los datos rellenados (nombres, cédulas, fechas)
+          no penalizan.
+        </p>
+
+        <div className="row">
+          <select value={plantillaForzada} onChange={(e) => setPlantillaForzada(e.target.value)}>
+            <option value="">Buscar la mejor del banco</option>
+            {plantillas.map((p) => (
+              <option key={p.id} value={p.id}>
+                Comparar solo contra: {p.nombre}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleVerificarFormato} disabled={!file || plantillas.length === 0 || formatoLoading}>
+            {formatoLoading ? "Comparando..." : "Verificar formato"}
+          </button>
+        </div>
+
+        {!file && <p className="hint">Carga primero un documento en la sección 1.</p>}
+
+        {formatoResult && (
+          <div className="formato-result">
+            <div className={`verdict-badge ${VERDICT_CLASS[formatoResult.verdict]}`}>
+              {formatoResult.verdict_label}
+              {formatoResult.mejor && <> — {formatoResult.mejor.nombre}</>}
+            </div>
+            {formatoResult.razones.map((r, i) => (
+              <p className="verdict-reason" key={i}>
+                {r}
+              </p>
+            ))}
+
+            {formatoResult.mejor && (
+              <>
+                <div className="layers">
+                  <div className="layer-card">
+                    <h4>Cobertura del formato</h4>
+                    <p>
+                      <strong>{pct(formatoResult.mejor.cobertura)}</strong> de los bloques
+                    </p>
+                    <p>
+                      {formatoResult.mejor.bloques.encontrados.length} encontrados,{" "}
+                      {formatoResult.mejor.bloques.faltantes.length} faltantes
+                    </p>
+                  </div>
+                  <div className="layer-card">
+                    <h4>Sellos y firmas</h4>
+                    {formatoResult.mejor.graficos.status === "no_aplica" ? (
+                      <p>La plantilla no tiene ninguno</p>
+                    ) : (
+                      <p>
+                        <strong>
+                          {formatoResult.mejor.graficos_presentes} de {formatoResult.mejor.graficos_total}
+                        </strong>{" "}
+                        encontrados
+                      </p>
+                    )}
+                  </div>
+                  <div className="layer-card">
+                    <h4>Similitud de texto</h4>
+                    <p>
+                      <strong>{pct(formatoResult.mejor.similitud_texto)}</strong>
+                    </p>
+                  </div>
+                  <div className="layer-card">
+                    <h4>Parecido visual</h4>
+                    <p>
+                      <strong>{pct(formatoResult.mejor.similitud_visual)}</strong>
+                    </p>
+                    <p className="hint">Señal de apoyo, no decide</p>
+                  </div>
+                </div>
+
+                {formatoResult.mejor.bloques.faltantes.length > 0 && (
+                  <div className="results">
+                    <h3>Falta en el documento ({formatoResult.mejor.bloques.faltantes.length})</h3>
+                    <ul>
+                      {formatoResult.mejor.bloques.faltantes.map((b, i) => (
+                        <li key={i}>
+                          "{b.texto}" <span className="prov">— página {b.page} de la plantilla</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {formatoResult.mejor.graficos.status === "ok" && (
+                  <div className="results">
+                    <h3>Sellos, firmas y logos</h3>
+                    <p className="hint">
+                      A la izquierda el de la plantilla, a la derecha lo más parecido que se encontró en el documento.
+                      Compara tú mismo: el porcentaje dice si se parecen, no si el sello es auténtico.
+                    </p>
+                    <div className="graficos-grid">
+                      {[...formatoResult.mejor.graficos.presentes, ...formatoResult.mejor.graficos.faltantes].map(
+                        (g, i) => (
+                          <div className={`grafico-par ${g.similitud >= 0.8 ? "ok" : "bad"}`} key={i}>
+                            <h4>
+                              {g.label} — {pct(g.similitud)} {g.similitud >= 0.8 ? "" : "(no encontrado)"}
+                            </h4>
+                            <div className="grafico-imgs">
+                              {g.recorte_plantilla && <img src={g.recorte_plantilla} alt="plantilla" />}
+                              {g.recorte_documento ? (
+                                <img src={g.recorte_documento} alt="documento" />
+                              ) : (
+                                <span className="prov">sin equivalente en el documento</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <button className="link-toggle" onClick={() => setVerDetalle(!verDetalle)}>
+                  {verDetalle ? "Ocultar detalle" : "Ver detalle y ranking del banco"}
+                </button>
+
+                {verDetalle && (
+                  <div className="results">
+                    <h3>Ranking del banco</h3>
+                    <ul>
+                      {formatoResult.ranking.map((r) => (
+                        <li key={r.plantilla_id}>
+                          <strong>{r.nombre}</strong> — cobertura {pct(r.cobertura)}, texto {pct(r.similitud_texto)},
+                          visual {pct(r.similitud_visual)}
+                          {r.graficos_total > 0 && (
+                            <>
+                              , sellos {r.graficos_presentes}/{r.graficos_total}
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <h3>Bloques encontrados ({formatoResult.mejor.bloques.encontrados.length})</h3>
+                    <ul>
+                      {formatoResult.mejor.bloques.encontrados.map((b, i) => (
+                        <li key={i}>
+                          "{b.texto}" <span className="prov">— {pct(b.score)} por vía {b.via}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </section>

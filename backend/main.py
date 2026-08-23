@@ -323,3 +323,58 @@ async def cargo_verify(
         "annotated_image": _as_data_url(annotated),
         **verdict,
     }
+
+
+# ---------------------------------------------------------------------------
+# Banco de plantillas
+# ---------------------------------------------------------------------------
+
+@app.post("/plantillas")
+async def crear_plantilla(
+    file: UploadFile = File(...),
+    nombre: str = Form(...),
+):
+    import plantillas
+
+    file_bytes = await file.read()
+    try:
+        return plantillas.registrar_plantilla(file_bytes, file.filename, nombre)
+    except Exception as exc:
+        return {"error": f"no se pudo registrar la plantilla: {exc}"}
+
+
+@app.get("/plantillas")
+def listar_plantillas():
+    import plantillas
+
+    return {"plantillas": plantillas.listar_plantillas()}
+
+
+@app.delete("/plantillas/{plantilla_id}")
+def eliminar_plantilla(plantilla_id: str):
+    import plantillas
+
+    if not plantillas.eliminar_plantilla(plantilla_id):
+        return {"error": "no existe esa plantilla"}
+    return {"eliminada": plantilla_id}
+
+
+@app.post("/plantillas/verificar")
+async def verificar_plantilla(
+    file: UploadFile = File(...),
+    plantilla_id: str = Form(""),
+    lines: str = Form(""),
+    paragraphs: str = Form(""),
+):
+    import plantillas
+
+    file_bytes = await file.read()
+    # Si la pantalla ya corrió el OCR, se reutiliza y la verificación es casi
+    # inmediata; el OCR es con diferencia lo más caro de todo el flujo.
+    return plantillas.comparar_documento(
+        file_bytes,
+        file.filename,
+        lines=json.loads(lines) if lines.strip() else None,
+        paragraphs=json.loads(paragraphs) if paragraphs.strip() else None,
+        plantilla_id=plantilla_id.strip() or None,
+    )

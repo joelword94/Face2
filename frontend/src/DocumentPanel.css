@@ -96,3 +96,89 @@ button {
   gap: 0.3rem;
   font-size: 0.9rem;
 }
+
+/* --- Banco de plantillas y verificación de formato --- */
+
+.plantillas-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.plantillas-tabla th,
+.plantillas-tabla td {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.plantillas-tabla th {
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.link-danger,
+.link-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-decoration: underline;
+}
+
+.link-danger {
+  color: #f87171;
+}
+
+.link-toggle {
+  color: inherit;
+  opacity: 0.8;
+  margin: 1rem 0;
+}
+
+.formato-result {
+  margin-top: 1.2rem;
+}
+
+.graficos-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.grafico-par {
+  padding: 0.7rem;
+  border-radius: 8px;
+  border-left: 5px solid #555;
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.grafico-par.ok {
+  border-left-color: #22c55e;
+}
+
+.grafico-par.bad {
+  border-left-color: #ef4444;
+}
+
+.grafico-par h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* Los recortes vienen a resolución de página: se limitan para que dos sellos
+   quepan lado a lado y se puedan comparar de un vistazo. */
+.grafico-imgs {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.grafico-imgs img {
+  max-width: 180px;
+  max-height: 140px;
+  background: #fff;
+  border-radius: 4px;
+}

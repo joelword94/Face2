@@ -13,3 +13,6 @@ runs/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Banco de plantillas: data del servidor, no del proyecto
+plantillas/
