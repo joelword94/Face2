@@ -1,0 +1,19 @@
+# Backend de vision + OCR. Probado con Python 3.12.
+# torch/torchvision: si tu otra PC tiene GPU NVIDIA, instala primero la rueda
+# CUDA desde https://pytorch.org y luego corre este archivo.
+fastapi==0.141.1
+uvicorn==0.52.4
+python-multipart==0.0.32
+
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.15.1
+sentence-transformers==6.0.0
+ultralytics==8.4.126
+
+easyocr==1.7.2
+pymupdf==1.28.2
+
+numpy==2.5.2
+pillow==12.3.0
+opencv-python==5.0.0.93

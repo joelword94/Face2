@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Sidebar from "./Sidebar";
 import ContainerPanel from "./ContainerPanel";
+import CargoVerifyPanel from "./CargoVerifyPanel";
 import DocumentPanel from "./DocumentPanel";
 import "./App.css";
 
@@ -12,6 +13,7 @@ function App() {
       <Sidebar active={section} onSelect={setSection} />
       <div className="content">
         {section === "container" && <ContainerPanel />}
+        {section === "container2" && <CargoVerifyPanel />}
         {section === "documento" && <DocumentPanel />}
       </div>
     </div>

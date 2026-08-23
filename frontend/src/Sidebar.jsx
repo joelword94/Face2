@@ -3,6 +3,7 @@ import "./Sidebar.css";
 function Sidebar({ active, onSelect }) {
   const items = [
     { id: "container", label: "Container" },
+    { id: "container2", label: "Container 2" },
     { id: "documento", label: "Documento" },
   ];
 

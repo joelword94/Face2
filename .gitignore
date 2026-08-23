@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Salidas de entrenamiento / inferencia de ultralytics
+runs/
+
+# Sistema
+.DS_Store
+Thumbs.db

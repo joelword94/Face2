@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+from pathlib import Path
 
 import torch
 from fastapi import FastAPI, File, UploadFile, Form
@@ -18,9 +19,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+#: Rutas relativas a este archivo, no al cwd: asi el backend arranca igual
+#: desde backend/ o desde la raiz del repo.
+MODELOS_DIR = Path(__file__).resolve().parent.parent / "modelos"
+
 YOLO_MODELS = {
-    "yolov8n-oiv7": "../modelos/yolov8n-oiv7.pt",
-    "yolov8s-oiv7": "../modelos/yolov8s-oiv7.pt",
+    "yolov8n-oiv7": str(MODELOS_DIR / "yolov8n-oiv7.pt"),
+    "yolov8s-oiv7": str(MODELOS_DIR / "yolov8s-oiv7.pt"),
 }
 
 GROUNDING_DINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
@@ -203,4 +208,118 @@ async def document_seal(
         "num_pages": len(pages),
         "pages": response_pages,
         "detections": all_detections,
+    }
+
+
+def _as_data_url(image: Image.Image) -> str:
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+@app.post("/cargo/extract")
+async def cargo_extract(
+    file: UploadFile = File(...),
+    use_semantic: bool = Form(True),
+):
+    """FOTO 1: lee la orden y extrae los campos estructurados."""
+    import cargo
+    import document
+
+    file_bytes = await file.read()
+    pages = document.load_document_pages(file_bytes, file.filename)
+    full_text, lines, _ = document.run_ocr(pages)
+    result = cargo.extract_order_fields(lines, use_semantic=use_semantic)
+
+    return {
+        "num_pages": len(pages),
+        "full_text": full_text,
+        "rows": result["rows"],
+        "fields": result["fields"],
+        "suggested_prompt": result["suggested_prompt"],
+        "suggested_term_source": result["suggested_term_source"],
+    }
+
+
+@app.post("/cargo/verify")
+async def cargo_verify(
+    file: UploadFile = File(...),
+    producto: str = Form(""),
+    embalaje: str = Form(""),
+    cantidad: str = Form(""),
+    prompt_override: str = Form(""),
+    reference_file: UploadFile | None = File(None),
+    check_label: bool = Form(True),
+    box_threshold: float = Form(0.30),
+    text_threshold: float = Form(0.25),
+    iou: float = Form(0.55),
+    contain: float = Form(0.80),
+    max_area_frac: float = Form(0.85),
+    tolerance: float = Form(0.15),
+):
+    """FOTO 2: cuenta unidades de carga y verifica contra lo declarado."""
+    import cargo
+    import document
+
+    file_bytes = await file.read()
+    pages = document.load_document_pages(file_bytes, file.filename)
+    image = cargo.preprocess_photo(pages[0])
+
+    if prompt_override.strip():
+        prompt, prompt_source = prompt_override.strip(), "override"
+    else:
+        prompt, prompt_source = cargo.map_packaging_term(embalaje)
+
+    # --- Capa 1: conteo de la unidad de carga
+    layer1 = cargo.count_load_units(
+        image,
+        prompt,
+        box_threshold=box_threshold,
+        text_threshold=text_threshold,
+        iou_thresh=iou,
+        contain_thresh=contain,
+        max_area_frac=max_area_frac,
+    )
+    if prompt_source == "fallback":
+        layer1["reliability"] = "baja"
+        layer1["reliability_reason"] = "el embalaje no se reconoció; se usó un término genérico"
+    layer1["prompt_used"] = prompt
+    layer1["prompt_source"] = prompt_source
+
+    # --- Capa 2: identidad por etiqueta impresa
+    if check_label and producto.strip():
+        layer2 = cargo.verify_label_on_cargo(image, producto)
+    else:
+        layer2 = {"status": "no_aplica", "matched_text": None, "confidence": 0.0, "box": None, "all_text": ""}
+
+    # --- Capa 3: comparación contra referencia
+    reference_image = None
+    if reference_file is not None:
+        ref_bytes = await reference_file.read()
+        if ref_bytes:
+            reference_image = document.load_document_pages(ref_bytes, reference_file.filename)[0]
+    layer3 = cargo.compare_against_reference(image, [d["box"] for d in layer1["detections"]], reference_image)
+
+    expected, expected_unit, expected_countable = cargo.parse_quantity(cantidad)
+    layer1["expected"] = expected
+
+    verdict = cargo.compute_verdict(
+        layer1, layer2, layer3, expected,
+        expected_countable=expected_countable,
+        tolerance=tolerance,
+    )
+
+    annotated = cargo.annotate_detections(image, layer1["detections"], layer1["suppressed"])
+
+    return {
+        "capa1": layer1,
+        "capa2": layer2,
+        "capa3": layer3,
+        "expected": expected,
+        "expected_unit": expected_unit,
+        "expected_countable": expected_countable,
+        "tolerance": tolerance,
+        "image_size": list(image.size),
+        "annotated_image": _as_data_url(annotated),
+        **verdict,
     }
